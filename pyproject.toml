@@ -1,0 +1,28 @@
+[project]
+name = "edatlas"
+version = "0.1.0"
+description = "A Python ETL pipeline for ingesting, validating, and analyzing U.S. higher education data from the College Scorecard API"
+readme = "README.md"
+authors = [
+    { name = "Tanish Mishra", email = "tanishmishra2025@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=3.0.6",
+    "psycopg[binary]>=3.3.6",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.1.3",
+]
+
+[project.scripts]
+edatlas = "edatlas.pipeline:run_pipeline"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -1,0 +1,31 @@
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Database backups
+*.dump
+
+# IDE
+.idea/
+
+# Generated datasets
+data/raw/
+data/processed/
+data/curated/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal notes
+Reserch.txt
