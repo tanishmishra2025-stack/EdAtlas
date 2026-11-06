@@ -53,7 +53,7 @@ def test_invalid_source_rejected_before_parquet_write(
 
     monkeypatch.setattr(
         pipeline,
-        "process_csv_to_parquet",
+        "publish_parquet",
         forbidden_write,
     )
 

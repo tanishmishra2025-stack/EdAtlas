@@ -1,6 +1,6 @@
-
 """Configuration-driven Spark processing pipeline for EdAtlas."""
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,9 +16,7 @@ from edatlas.processing.spark_pipeline import (
     IPEDS_COMPLETIONS_TOTALS_SCHEMA,
     COLLEGE_SCORECARD_SCHEMA,
     COLLEGE_SCORECARD_CURATED_SCHEMA,
-    process_csv_to_parquet,
 )
-
 from edatlas.processing.spark_validation import validate_dataset
 
 
@@ -76,6 +74,45 @@ DATASETS = [
 ]
 
 
+def publish_parquet(spark, df, output_path: Path, expected_count: int):
+    """Write to a temp folder, verify it, then swap it into place."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = output_path.with_name(output_path.name + ".tmp")
+    old_path = output_path.with_name(output_path.name + ".old")
+
+    # Recover from a swap that was interrupted on a previous run.
+    if old_path.exists() and not output_path.exists():
+        old_path.rename(output_path)
+
+    # Clean up leftovers from a previously failed run.
+    for leftover in (tmp_path, old_path):
+        if leftover.exists():
+            shutil.rmtree(leftover)
+
+    try:
+        df.write.mode("errorifexists").parquet(str(tmp_path))
+
+        check = spark.read.parquet(str(tmp_path))
+        if check.count() != expected_count:
+            raise ValueError("Parquet row count does not match source")
+
+        written = [(f.name, f.dataType) for f in check.schema.fields]
+        expected = [(f.name, f.dataType) for f in df.schema.fields]
+        if written != expected:
+            raise ValueError("Parquet schema mismatch")
+    except Exception:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+        raise  # the existing output is untouched
+
+    # Swap: keep the old output until the new one is in place.
+    if output_path.exists():
+        output_path.rename(old_path)
+    tmp_path.rename(output_path)
+    shutil.rmtree(old_path, ignore_errors=True)
+
+
 def main():
     spark = (
         SparkSession.builder
@@ -89,8 +126,6 @@ def main():
             print(f"\nPROCESSING: {dataset.name}", flush=True)
 
             input_path = PROJECT_ROOT / dataset.source
-
-            # Use a separate output folder while testing V2.
             output_path = (
                 PROJECT_ROOT
                 / "data/processed/parquet_v2"
@@ -100,36 +135,33 @@ def main():
             if not input_path.is_file():
                 raise FileNotFoundError(input_path)
 
-                       # Read and validate the source before writing.
             source = (
                 spark.read
                 .option("header", True)
                 .option("mode", "FAILFAST")
                 .schema(dataset.schema)
                 .csv(str(input_path))
+                .cache()
             )
 
-            source_count = source.count()
+            try:
+                source_count = source.count()
+                if source_count != dataset.expected_count:
+                    raise ValueError(
+                        f"{dataset.name}: expected "
+                        f"{dataset.expected_count} records, "
+                        f"found {source_count}"
+                    )
 
-            if source_count != dataset.expected_count:
-                raise ValueError(
-                    f"{dataset.name}: expected "
-                    f"{dataset.expected_count} records, "
-                    f"found {source_count}"
+                validate_dataset(dataset.name, source)
+                publish_parquet(
+                    spark, source, output_path, dataset.expected_count
                 )
+                print(f"{dataset.name}: PUBLISHED ({source_count} rows)")
+            finally:
+                source.unpersist()
 
-            validate_dataset(dataset.name, source)
-
-            # Only write after source validation passes.
-            result = process_csv_to_parquet(
-                spark=spark,
-                input_path=input_path,
-                output_path=output_path,
-                schema=dataset.schema,
-                expected_count=dataset.expected_count,
-            )
-
-        print("\nALL 7 DATASETS VALIDATED SUCCESSFULLY")
+        print(f"\nALL {len(DATASETS)} DATASETS PUBLISHED SUCCESSFULLY")
 
     finally:
         spark.stop()
