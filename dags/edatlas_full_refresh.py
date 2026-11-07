@@ -89,6 +89,11 @@ with DAG(
         "edatlas.processing.spark_pipeline_v2",
     )
 
+    warehouse_build = run_module(
+        "build_warehouse",
+        "edatlas.warehouse.build",
+    )
+
     (
         check_raw_files
         >> scorecard
@@ -101,4 +106,5 @@ with DAG(
         >> bls
         >> bls_load
         >> spark
+	>> warehouse_build
     )
