@@ -106,11 +106,31 @@ def publish_parquet(spark, df, output_path: Path, expected_count: int):
         shutil.rmtree(tmp_path, ignore_errors=True)
         raise  # the existing output is untouched
 
-    # Swap: keep the old output until the new one is in place.
-    if output_path.exists():
-        output_path.rename(old_path)
-    tmp_path.rename(output_path)
-    shutil.rmtree(old_path, ignore_errors=True)
+    # Swap: retain the old output until publication succeeds.
+    previous_moved = False
+
+    try:
+        if output_path.exists():
+            output_path.rename(old_path)
+            previous_moved = True
+
+        tmp_path.rename(output_path)
+
+    except Exception:
+        # Restore the previous output if promotion fails.
+        if previous_moved:
+            old_path.rename(output_path)
+
+        raise
+
+    finally:
+        # Remove staged files left by a failed promotion.
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path)
+
+    # The new output is published; the backup is no longer needed.
+    if old_path.exists():
+        shutil.rmtree(old_path)
 
 
 def main():

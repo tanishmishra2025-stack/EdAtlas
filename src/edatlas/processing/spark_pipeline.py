@@ -123,45 +123,87 @@ def process_csv_to_parquet(
     output_path,
     schema,
     expected_count=None,
+    validated_df=None,
 ):
-    """Convert a CSV dataset to validated Parquet."""
-    df = (
-        spark.read
-        .option("header", True)
-        .option("mode", "FAILFAST")
-        .schema(schema)
-        .csv(str(input_path))
-    )
+    """Write validated Parquet using staging and backup recovery."""
+    import os
+    import shutil
+    from pathlib import Path
+    from uuid import uuid4
+
+    output = Path(output_path).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    identifier = uuid4().hex
+    staging = output.parent / f".{output.name}.staging-{identifier}"
+    backup = output.parent / f".{output.name}.backup-{identifier}"
+
+    df = validated_df
+
+    if df is None:
+        df = (
+            spark.read
+            .option("header", True)
+            .option("mode", "FAILFAST")
+            .schema(schema)
+            .csv(str(input_path))
+        )
 
     source_count = df.count()
 
-    if expected_count is not None:
-        if source_count != expected_count:
-            raise ValueError(
-                f"Expected {expected_count} rows, "
-                f"found {source_count}"
-            )
-
-    df.write.mode("overwrite").parquet(str(output_path))
-
-    result = spark.read.parquet(str(output_path))
-    parquet_count = result.count()
-
-    if parquet_count != source_count:
+    if expected_count is not None and source_count != expected_count:
         raise ValueError(
-            "Parquet row count does not match source"
+            f"Expected {expected_count} rows, found {source_count}"
         )
 
-    if result.schema != df.schema:
-        raise ValueError("Parquet schema mismatch")
+    if output.exists() and not output.is_dir():
+        raise ValueError(f"Parquet output is not a directory: {output}")
 
-    print(f"Source records: {source_count}")
-    print(f"Parquet records: {parquet_count}")
-    print(f"Columns: {len(result.columns)}")
-    print("PARQUET VALIDATION PASSED")
+    previous_moved = False
+    published = False
 
-    return result
+    try:
+        # Never write directly to the published dataset.
+        df.write.mode("errorifexists").parquet(str(staging))
 
+        staged_result = spark.read.parquet(str(staging))
+
+        if staged_result.count() != source_count:
+            raise ValueError("Staged Parquet row count mismatch")
+
+        if staged_result.schema != df.schema:
+            raise ValueError("Staged Parquet schema mismatch")
+
+        # Keep the previous dataset until staging is validated.
+        if output.exists():
+            os.replace(output, backup)
+            previous_moved = True
+
+        try:
+            os.replace(staging, output)
+            published = True
+        except Exception:
+            if previous_moved:
+                os.replace(backup, output)
+                previous_moved = False
+            raise
+
+        result = spark.read.parquet(str(output))
+
+        print(f"Source records: {source_count}")
+        print(f"Parquet records: {source_count}")
+        print(f"Columns: {len(result.columns)}")
+        print("PARQUET VALIDATION PASSED")
+
+        return result
+
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+        # Only remove the old dataset after successful publication.
+        if published and backup.exists():
+            shutil.rmtree(backup)
 
 def main():
     spark = (
