@@ -1,36 +1,42 @@
-# EdAtlas — U.S. Higher Education ETL Pipeline
+# EdAtlas — Higher Education Data Engineering Pipeline
 
-EdAtlas is an end-to-end Python data engineering project that ingests higher education institution data from the U.S. Department of Education's College Scorecard API, transforms and validates the data, and loads it into PostgreSQL for SQL analytics.
+EdAtlas is an end-to-end data engineering project integrating U.S. higher education and labor-market data from College Scorecard, IPEDS, and BLS OEWS.
+
+The system uses Python for ingestion and transformation, Apache Spark for validated Parquet processing, PostgreSQL for dimensional data warehousing, and Apache Airflow for workflow orchestration.
+
+## Project Highlights
+
+| Metric | Verified Result |
+|---|---:|
+| Government data sources | 3 |
+| Processed datasets | 7 |
+| Records across datasets | 347,607 |
+| Warehouse dimension tables | 5 |
+| Warehouse fact tables | 4 |
+| Automated tests | 86 passed |
+| Full-refresh Airflow tasks | 12 successful |
 
 ## Technology Stack
 
-Python 3.12 · pandas · PostgreSQL 17 · SQLAlchemy · psycopg · Docker · pytest · uv
+Python 3.12 · pandas · PySpark · PostgreSQL 17 · Apache Airflow · SQLAlchemy · psycopg · Docker · pytest · uv
 
 ## Pipeline Architecture
 
-```text
-College Scorecard REST API
-          |
-          v
-Paginated Data Extraction
-          |
-          v
-Raw JSON
-          |
-          v
-Transformation (pandas)
-          |
-          v
-Data Curation
-          |
-          v
-Data Quality Validation
-          |
-          v
-Transactional PostgreSQL Loading
-          |
-          v
-SQL Analytics
+```mermaid
+flowchart TD
+    A[College Scorecard] --> D[Python Ingestion]
+    B[IPEDS] --> D
+    C[BLS OEWS] --> D
+    D --> E[Transform and Validate]
+    E --> F[PostgreSQL Source Tables]
+    E --> G[Curated CSV]
+    G --> H[PySpark Processing]
+    H --> I[Parquet Datasets]
+    F --> J[Dimensional Warehouse]
+    J --> K[SQL Analytics]
+    L[Apache Airflow] -.-> D
+    L -.-> H
+    L -.-> J
 ```
 
 ## Key Features
@@ -45,50 +51,34 @@ SQL Analytics
 - Provides SQL analytics for institutions by state, net prices, and earnings-to-price comparisons.
 - Includes automated tests for transformation, curation, validation, and transaction rollback behavior.
 
-## Verified Results
-
-| Metric | Result |
-|---|---|
-| Institutions processed | 6,273 |
-| Unique school IDs | 6,273 |
-| Data validation errors | 0 |
-| Source-data warnings | 12 |
-| Automated tests passing | 18 |
-
-These figures represent one verified pipeline execution and may change as source data is updated.
-
 ## Project Structure
 
-```text
-EdAtlas/
-├── src/edatlas/
-│   ├── ingestion/
-│   ├── transformation/
-│   ├── quality/
-│   ├── loading/
-│   └── pipeline.py
-├── sql/
-├── tests/
-├── data/                   # Generated datasets (not committed)
-├── pyproject.toml
-├── uv.lock
-├── .env.example
-└── README.md
-```
+- `dags/` — Airflow orchestration workflows
+- `src/edatlas/ingestion/` — College Scorecard, IPEDS, and BLS ingestion
+- `src/edatlas/transformation/` — Data cleaning and transformation
+- `src/edatlas/loading/` — PostgreSQL source-table loaders
+- `src/edatlas/quality/` — Data quality checks
+- `src/edatlas/processing/` — PySpark processing and validation
+- `src/edatlas/warehouse/` — Dimensional warehouse builder
+- `sql/` — Analytics, schema definitions, and reconciliation
+- `tests/` — Automated tests
+- `data/` — Local datasets (not committed)
 
 ## Installation
 
 Requirements:
 
 - Python 3.12 or newer
+- Java 17 for the verified local Spark environment
 - uv package manager
+- Apache Spark / PySpark and Apache Airflow for their respective workflows
 - PostgreSQL 17 (locally or through Docker)
 - College Scorecard API key
 
 Install dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 Copy `.env.example` to `.env` and provide the appropriate API key and PostgreSQL connection settings.
@@ -117,23 +107,54 @@ uv run python -m edatlas.pipeline
 
 The local mode requires an existing raw JSON dataset.
 
+## Spark V2 Processing
+
+Run after preparing the required source CSV datasets:
+
+```bash
+uv run --frozen python -m edatlas.processing.spark_pipeline_v2
+```
+
+The pipeline validates and publishes seven Parquet datasets using staged writes and backup recovery.
+
 ## Testing
 
 Run the full test suite:
 
 ```bash
-uv run pytest -v
+uv run --frozen pytest -q
 ```
 
-The current suite contains 18 tests. Database-dependent transaction testing requires an accessible PostgreSQL instance.
+The latest verified test run passed all 86 tests, including Parquet reliability, warehouse, and Airflow DAG tests.
+
+## Dimensional Warehouse
+
+The PostgreSQL `dw` schema contains five dimensions and four fact tables, plus the `vw_institution_overview` analytical view.
+
+Warehouse implementation: `src/edatlas/warehouse/build.py`.
+
+SQL definitions and reconciliation checks: `sql/09_build_warehouse.sql` and `sql/10_check_warehouse.sql`.
+
+**Warning:** The local warehouse build recreates the `dw` schema. Do not run it against a database containing irreplaceable data.
+
+## Airflow Orchestration
+
+The `dags/` directory includes `edatlas_pipeline.py` (four tasks) and `edatlas_full_refresh.py` (twelve tasks).
+
+Both DAGs support manual triggering. The full-refresh workflow successfully completed all twelve tasks in the verified local environment.
+
+Airflow requires a separately configured environment with access to the project, source data, and PostgreSQL database.
 
 ## SQL Analytics
 
-The `sql/` directory contains:
+The `sql/` directory contains analytics, cross-source joins, database definitions, warehouse construction, and reconciliation queries. Key scripts include:
 
 1. `01_colleges_by_state.sql` — Institution distribution by state.
 2. `02_average_net_price_by_state.sql` — Average reported net prices by state.
 3. `03_earnings_price_comparison.sql` — Descriptive earnings-to-price comparison.
+4. `04_college_scorecard_ipeds_join.sql` — Cross-source institution joins.
+5. `09_build_warehouse.sql` — Dimensional warehouse construction.
+6. `10_check_warehouse.sql` — Warehouse reconciliation checks.
 
 The earnings-to-price ratio is not a formal return-on-investment measure.
 
@@ -142,14 +163,18 @@ The earnings-to-price ratio is not a formal return-on-investment measure.
 - Some source data fields contain missing or unusual values.
 - Database initialization is not yet automated.
 - Retries, backoff, and API resilience can be improved.
-- Dedicated integration tests for the loading function are planned.
 - Continuous integration and automated deployment are future improvements.
+- The verified deployment runs locally; production cloud deployment has not been demonstrated.
+- Parquet publication handles tested failures but is not crash-proof or safe for concurrent writers.
+- Airflow full refresh is manually triggered, and the warehouse build recreates the `dw` schema.
 
-## Data Source
+## Data Sources
 
-U.S. Department of Education — College Scorecard
+1. **College Scorecard** — U.S. Department of Education institution and outcome data. https://collegescorecard.ed.gov/data/
 
-https://collegescorecard.ed.gov/data/
+2. **IPEDS** — Institution characteristics, enrollment, and completions data. https://nces.ed.gov/ipeds/
+
+3. **BLS OEWS** — Occupational employment and wage estimates. https://www.bls.gov/oes/
 
 ## Purpose
 
