@@ -1,5 +1,7 @@
 # EdAtlas — Higher Education Data Engineering Pipeline
 
+[![EdAtlas CI](https://github.com/tanishmishra2025-stack/EdAtlas/actions/workflows/ci.yml/badge.svg)](https://github.com/tanishmishra2025-stack/EdAtlas/actions/workflows/ci.yml)
+
 EdAtlas is an end-to-end data engineering portfolio project that integrates U.S. higher education and labor-market data from **College Scorecard**, **IPEDS**, and **BLS Occupational Employment and Wage Statistics (OEWS)**.
 
 It uses Python for ingestion and transformation, PySpark for validated Parquet publication, PostgreSQL for a dimensional analytics warehouse, and Apache Airflow for orchestration. The project emphasizes data validation, reconciliation, reproducibility, and clear documentation of limitations.
