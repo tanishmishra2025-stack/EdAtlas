@@ -1,0 +1,41 @@
+
+name: EdAtlas CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Check Python syntax
+        run: uv run --frozen python -m compileall -q src scripts tests
+
+      - name: Run tests without database services
+        run: |
+          uv run --frozen pytest -q \
+            --ignore=tests/test_warehouse.py \
+            --ignore=tests/test_bls_oews_integration.py \
+            --ignore=tests/test_college_scorecard_loading.py \
+            --ignore=tests/test_ipeds_integration.py \
+            --ignore=tests/test_ipeds_enrollment_integration.py \
+            --ignore=tests/test_ipeds_completions_integration.py \
+            --ignore=tests/test_sql_runner.py
